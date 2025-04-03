@@ -1,0 +1,93 @@
+name: test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        perl: ['5.40', '5.38', '5.36', '5.34', '5.32']
+        exclude:
+          - os: macos-latest
+            perl: '5.32'
+          - os: macos-latest
+            perl: '5.34'
+          - os: macos-latest
+            perl: '5.36'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Perl ${{ matrix.perl }}
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: ${{ matrix.perl }}
+          install-modules-with: cpanm
+
+      - name: Install ragel
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update -y && sudo apt-get install -y ragel
+          else
+            brew install ragel
+          fi
+        shell: bash
+
+      - name: Install dependencies
+        run: |
+          cpanm --notest --quiet \
+            ExtUtils::MakeMaker \
+            Inline Inline::C Inline::Filters::Ragel \
+            Test::More Test::LeakTrace Devel::Size URI::Escape::XS Encode
+
+      - name: Build
+        run: |
+          perl Makefile.PL
+          make
+
+      - name: Test
+        run: make test
+
+  author:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.40'
+          install-modules-with: cpanm
+
+      - name: Install ragel
+        run: sudo apt-get update -y && sudo apt-get install -y ragel
+
+      - name: Install dependencies (test + develop)
+        run: |
+          cpanm --notest --quiet \
+            ExtUtils::MakeMaker \
+            Inline Inline::C Inline::Filters::Ragel \
+            Test::More Test::LeakTrace Devel::Size URI::Escape::XS Encode \
+            Test::Pod Test::Pod::Coverage Test::CheckManifest Test::Spelling \
+            Test::NoTabs Test::EOL Test::CPAN::Changes Test::CPAN::Meta \
+            Test::Kwalitee::Extra JSON::PP Plack::Request Mojolicious::Lite
+
+      - name: Build
+        run: |
+          perl Makefile.PL
+          make
+
+      - name: Author tests
+        run: prove -l xt/
+        env:
+          ROUTER_RAGEL_PROPERTY_ITERS: 50
+          ROUTER_RAGEL_FUZZ_ITERS: 100
+          ROUTER_RAGEL_STRESS_N: 500
+          ROUTER_RAGEL_REGRESSION_ITERS: 20000
