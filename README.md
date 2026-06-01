@@ -61,9 +61,9 @@ Adding a route after `compile` invalidates the compiled state; the next
 
     $router->compile;
 
-Builds and binds the Ragel state machine. Must be called before `match`.
-Returns the router. May be called more than once to incorporate routes added
-between calls; see ["LIMITATIONS"](#limitations) for the cost of recompiling.
+Builds and binds the Ragel state machine. Must be called before `match`;
+`croak`s if no routes have been added. Returns the router. May be called
+more than once to incorporate routes added between calls; see ["LIMITATIONS"](#limitations) for the cost of recompiling.
 
 ## match
 
@@ -79,6 +79,24 @@ Perl's method dispatch:
     my ($data, @captures) = Router::Ragel::match($router, $path);
 
 Both forms run the same compiled state machine.
+
+Call `match` in list context. In scalar context it yields only the last
+value pushed (the last capture, or the route data when the route has none),
+which is rarely what you want.
+
+## Route precedence
+
+When more than one route matches the same path, the route added **last**
+wins. Overlapping a specific route with a later, more general one shadows the
+earlier route:
+
+    my $router = Router::Ragel->new
+        ->add('/files/index', 'index')
+        ->add('/files/:name', 'show')   # added last
+        ->compile;
+    my ($h) = $router->match('/files/index');   # 'show', not 'index'
+
+Add the route you want to win **last**, or avoid overlapping patterns.
 
 # ROUTE PATTERNS
 
@@ -203,8 +221,9 @@ skipped.
 - Patterns and paths are byte strings. Wide-character (utf8-flagged) strings
 are matched against their UTF-8 byte representation.
 - Patterns must start with `/` and must not be empty, contain a NUL byte,
-contain consecutive slashes, use a bare `:` placeholder name, or contain an
-empty or unterminated `<type>`. `compile` `croak`s on any of these.
+contain consecutive slashes, use a bare `:` placeholder name, or contain a
+`<type>` that is empty, unterminated, or itself contains a `<`.
+`compile` `croak`s on any of these.
 - Matching is exact: `/users` matches only `/users`, not `//users`,
 `/users/`, or `/users//`. `/users` and `/users/` are distinct routes.
 Normalize input ahead of `match` to fold repeated or trailing slashes.
@@ -213,6 +232,8 @@ Normalize input ahead of `match` to fold repeated or trailing slashes.
 shared library; the previous one stays loaded for the lifetime of the
 process. See ["DEPLOYMENT"](#deployment) for the implications under pre-forking servers.
 - Calling `match` before `compile` `croak`s.
+- When several routes match the same path, the **most recently added** route
+wins; see ["Route precedence"](#route-precedence).
 
 # SEE ALSO
 
