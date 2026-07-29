@@ -15,6 +15,7 @@ add_stopwords(qw(
     XSUB XSUBs alnum xdigit
     NUL lookaround trie
     PSGI reproducibility
+    SV allowlist codebase backtrack
 ));
 
 all_pod_files_spelling_ok();

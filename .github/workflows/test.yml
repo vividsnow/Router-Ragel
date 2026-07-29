@@ -55,6 +55,64 @@ jobs:
       - name: Test
         run: make test
 
+  # The matcher is reached through a raw code address on the object, so an
+  # ithreads perl (which clones the object but shares the loaded .so) deserves
+  # its own job: multi-thread defaults to false on Linux, so the matrix above
+  # never covers it.
+  threads:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up threaded Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.40'
+          multi-thread: true
+          install-modules-with: cpanm
+
+      - name: Confirm this perl really has ithreads
+        run: |
+          perl -V:useithreads
+          perl -MConfig -e 'die "not an ithreads perl -- this job would prove nothing\n"
+            unless $Config{useithreads}'
+
+      - name: Install ragel
+        run: sudo apt-get update -y && sudo apt-get install -y ragel
+
+      - name: Install dependencies
+        run: |
+          cpanm --notest --quiet \
+            ExtUtils::MakeMaker \
+            Inline Inline::C Inline::Filters::Ragel \
+            Test::More Test::LeakTrace Devel::Size URI::Escape::XS Encode
+
+      - name: Build
+        run: |
+          perl Makefile.PL
+          make
+
+      - name: Test
+        run: make test
+
+      - name: Match from spawned threads
+        run: |
+          perl -Iblib/lib -e '
+            use threads;
+            use Router::Ragel;
+            my $r = Router::Ragel->new->add("/t/:id<int>", "T")->compile;
+            my @got = map { $_->join }
+                      map { my $n = $_; threads->create(sub { join ",", $r->match("/t/$n") }) } 1 .. 4;
+            print "thread $_ -> $got[$_ - 1]\n" for 1 .. 4;
+            die "wrong result from a thread\n" if grep { $got[$_ - 1] ne "T,$_" } 1 .. 4;
+            my $t = threads->create(sub {
+                join ",", Router::Ragel->new->add("/in/:x", "I")->compile->match("/in/z");
+            });
+            my $inner = $t->join;
+            print "compiled inside a thread -> $inner\n";
+            die "compiling in a thread failed\n" unless $inner eq "I,z";
+          '
+
   author:
     runs-on: ubuntu-latest
     steps:
@@ -77,7 +135,8 @@ jobs:
             Test::More Test::LeakTrace Devel::Size URI::Escape::XS Encode \
             Test::Pod Test::Pod::Coverage Test::CheckManifest Test::Spelling \
             Test::NoTabs Test::EOL Test::CPAN::Changes Test::CPAN::Meta \
-            Test::Kwalitee::Extra JSON::PP Plack::Request Mojolicious::Lite
+            Test::Kwalitee::Extra JSON::PP Pod::Markdown \
+            Plack::Request Mojolicious::Lite
 
       - name: Build
         run: |

@@ -7,6 +7,6 @@ use Test::More;
 # those when running author tests against source.
 eval q{
     use Test::Kwalitee::Extra
-        qw(!has_meta_yml !has_meta_json !has_separate_license_file !prereq_matches_use);
+        qw(!has_meta_yml !has_meta_json !prereq_matches_use);
 };
 plan skip_all => 'Test::Kwalitee::Extra required' if $@;

@@ -12,9 +12,14 @@ use Router::Ragel;
 # runs stay within ROUTER_RAGEL_REGRESSION_THRESHOLD (default 0.85, i.e. up
 # to a 15% drop allowed) of that baseline. Numbers vary across hardware, so
 # the baseline file is host-specific and not shipped in the dist.
+#
+# Recording a baseline SKIPS rather than passes: a fresh CI runner has no
+# baseline, and reporting a pass there would advertise coverage this test did
+# not provide. It only asserts on a host that has run it before.
 
 my $baseline_file = "$Bin/regression-baseline.json";
 my $threshold = $ENV{ROUTER_RAGEL_REGRESSION_THRESHOLD} || 0.85;
+my $have_baseline = -f $baseline_file && !$ENV{ROUTER_RAGEL_REWRITE_BASELINE};
 
 my $r = Router::Ragel->new
     ->add('/qest/qwe', 1)
@@ -37,14 +42,26 @@ my @paths = (
 for (1..5000) { Router::Ragel::match($r, $_) for @paths }
 
 my $iters = $ENV{ROUTER_RAGEL_REGRESSION_ITERS} // 50_000;
-my $start = time;
-for (1..$iters) { Router::Ragel::match($r, $_) for @paths }
-my $elapsed = time - $start;
-my $rate = ($iters * @paths) / $elapsed;
-note(sprintf 'rate: %.0f matches/sec (%.3fs for %d calls)',
-     $rate, $elapsed, $iters * scalar @paths);
 
-if (-f $baseline_file && !$ENV{ROUTER_RAGEL_REWRITE_BASELINE}) {
+# Take the best of several passes. What we want to detect is a change in the
+# hot path; a slow pass means the machine was busy, not that matching got
+# slower. Measuring the minimum makes the tripwire survive a loaded box (a
+# single-pass version of this test swung between 81% and 99% of baseline on
+# one host purely with background load).
+my $reps = $ENV{ROUTER_RAGEL_REGRESSION_REPS} // 3;
+my $rate = 0;
+for my $rep (1 .. $reps) {
+    my $start = time;
+    for (1..$iters) { Router::Ragel::match($r, $_) for @paths }
+    my $elapsed = time - $start;
+    my $this = ($iters * @paths) / $elapsed;
+    note(sprintf 'pass %d/%d: %.0f matches/sec (%.3fs for %d calls)',
+         $rep, $reps, $this, $elapsed, $iters * scalar @paths);
+    $rate = $this if $this > $rate;
+}
+note(sprintf 'rate: %.0f matches/sec (best of %d)', $rate, $reps);
+
+if ($have_baseline) {
     open my $fh, '<', $baseline_file or die "open $baseline_file: $!";
     my $data = decode_json(do { local $/; <$fh> });
     close $fh;
@@ -55,12 +72,12 @@ if (-f $baseline_file && !$ENV{ROUTER_RAGEL_REWRITE_BASELINE}) {
     ok($rate >= $baseline * $threshold,
        sprintf('rate %.0f >= %.0f * %g (%.0f)',
                $rate, $baseline, $threshold, $baseline * $threshold));
+    done_testing;
 } else {
     open my $fh, '>', $baseline_file or die "open $baseline_file: $!";
     print $fh encode_json({ rate => $rate, recorded => scalar localtime });
     close $fh;
-    pass(sprintf 'wrote baseline (%.0f matches/sec) to %s', $rate, $baseline_file);
-    diag 'Baseline created. Re-run to assert against it.';
+    plan skip_all => sprintf
+        'no baseline for this host; recorded %.0f matches/sec, re-run to assert against it',
+        $rate;
 }
-
-done_testing;

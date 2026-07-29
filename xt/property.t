@@ -19,6 +19,8 @@ sub rhex {
     my @c = ('0'..'9', 'a'..'f');
     join '', map $c[rand @c], 1..(int(rand 6) + 1);
 }
+sub rletters { my @c = ('a'..'z'); join '', map $c[rand @c], 1..(int(rand 4) + 1) }
+sub rdigits { join '', map int rand 10, 1..(int(rand 4) + 1) }
 
 sub generate_pair {
     my $nsegs = int(rand 4) + 1;
@@ -32,12 +34,20 @@ sub generate_pair {
         } elsif ($r < 0.6) {
             push @pat_segs, ':' . rname();
             push @vals, rstr(int(rand 6) + 1);
-        } elsif ($r < 0.8) {
+        } elsif ($r < 0.7) {
             push @pat_segs, ':' . rname() . '<int>';
             push @vals, int(rand 1_000_000) + 1;
-        } else {
+        } elsif ($r < 0.8) {
             push @pat_segs, ':' . rname() . '<hex>';
             push @vals, rhex();
+        } elsif ($r < 0.9) {
+            # Multi-term types: the capture must cover every branch/term, not
+            # just the last one.
+            push @pat_segs, ':' . rname() . "<'ab'|'cd'|'efg'>";
+            push @vals, ('ab', 'cd', 'efg')[int rand 3];
+        } else {
+            push @pat_segs, ':' . rname() . '<[a-z]+ [0-9]+>';
+            push @vals, rletters() . rdigits();
         }
     }
     # Build path: literal segments echo themselves; placeholder segments
